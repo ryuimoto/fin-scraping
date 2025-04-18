@@ -1,5 +1,3 @@
-# 現状完成形
-
 import requests
 from bs4 import BeautifulSoup
 from transformers import pipeline
@@ -7,54 +5,56 @@ from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods.posts import NewPost
 import google.generativeai as genai
 import re
+import os
+from dotenv import load_dotenv
 
-# 設定
-wp_url = "http://bottest.local/xmlrpc.php"
-wp_username = "root"
-wp_password = "root"
-gemini_api_key = "AIzaSyDPPt9BASSongNilmj_kMJ6lSBjckvHCVQ"
+# .envファイルの読み込み
+load_dotenv()
+
+# 設定（envから取得）
+wp_url = os.getenv("WP_URL")
+wp_username = os.getenv("WP_USERNAME")
+wp_password = os.getenv("WP_PASSWORD")
+gemini_api_key = os.getenv("GEMINI_API_KEY")
 
 # Gemini初期化
 genai.configure(api_key=gemini_api_key)
 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
-# 要約（未使用になっているが残しておく場合）
+# 要約（未使用）
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-def scrape_archive_page(archive_url):
+def scrape_top_article(url):
     try:
-        response = requests.get(archive_url)
+        response = requests.get(url)
         response.raise_for_status()
     except requests.RequestException as e:
-        print(f"アーカイブページ({archive_url})の取得に失敗しました:", e)
-        return []
+        print(f"ページ({url})の取得に失敗しました:", e)
+        return None
 
     soup = BeautifulSoup(response.text, "html.parser")
-    articles = []
-    article_blocks = soup.select("div.article-outer.hentry")
+    article_block = soup.select_one("div.article-outer.hentry")
 
-    for block in article_blocks:
-        date_elem = block.select_one(".article-date")
-        title_elem = block.select_one("h2.article-title.entry-title")
-        body_elem = block.select_one("div.article-body.entry-content")
+    if not article_block:
+        print("記事ブロックが見つかりませんでした")
+        return None
 
-        date = date_elem.get_text(strip=True) if date_elem else "日付なし"
-        title = title_elem.get_text(strip=True) if title_elem else "タイトルなし"
-        body = body_elem.get_text(strip=True) if body_elem else "本文なし"
+    date_elem = article_block.select_one(".article-date")
+    title_elem = article_block.select_one(".article-header .article-title.entry-title h2")
+    body_elem = article_block.select_one(".article-body.entry-content > div")
 
-        articles.append({
-            "date": date,
-            "original_title": title,
-            "body": body,
-            "source_url": archive_url
-        })
+    date = date_elem.get_text(strip=True) if date_elem else "日付なし"
+    title = title_elem.get_text(strip=True) if title_elem else "タイトルなし"
+    body = body_elem.get_text(strip=True) if body_elem else "本文なし"
 
-    return articles
+    return {
+        "date": date,
+        "original_title": title,
+        "body": body,
+        "source_url": url
+    }
 
 def clean_generated_text(text):
-    """
-    BOBGリンクや宣伝文を削除
-    """
     text = re.sub(r"BOBGについて.*?https?://\S+", "", text, flags=re.DOTALL)
     return text.strip()
 
@@ -93,8 +93,6 @@ def post_to_wordpress_xmlrpc(article):
         post.title = article["generated_title"]
         post.content = f"""
 <p>{article['generated_body'].replace('\n', '<br>')}</p>
-<hr>
-<p><a href="{article['source_url']}" target="_blank" rel="noopener noreferrer">▶ 参考記事を読む</a></p>
 """
         post.post_status = 'publish'
         post_id = client.call(NewPost(post))
@@ -105,30 +103,28 @@ def post_to_wordpress_xmlrpc(article):
         return False
 
 def main():
-    archive_url = "https://ripple.2chblog.jp/archives/2025-03.html"
-    print("📥 アーカイブ取得:", archive_url)
-    articles = scrape_archive_page(archive_url)
+    url = "https://ripple.2chblog.jp/"
+    print("📥 トップページ取得:", url)
+    article = scrape_top_article(url)
 
-    if not articles:
-        print("記事が見つかりませんでした。")
+    if not article:
+        print("記事が取得できませんでした。")
         return
 
-    for i, article in enumerate(articles):
-        print(f"\n=== 記事 {i+1} / {len(articles)} ===")
-        print(f"📰 元タイトル: {article['original_title']}")
+    print(f"📰 元タイトル: {article['original_title']}")
 
-        # タイトル & 本文生成
-        title, body = generate_title_and_article(article["original_title"], article["body"])
-        article["generated_title"] = title
-        article["generated_body"] = body
+    # タイトル & 本文生成
+    title, body = generate_title_and_article(article["original_title"], article["body"])
+    article["generated_title"] = title
+    article["generated_body"] = body
 
-        print(f"✨ 生成タイトル: {title}")
-        print("✅ Gemini生成完了")
+    print(f"✨ 生成タイトル: {title}")
+    print("✅ Gemini生成完了")
 
-        # 投稿
-        post_to_wordpress_xmlrpc(article)
+    # 投稿
+    post_to_wordpress_xmlrpc(article)
 
-    print("\n🎉 全投稿完了")
+    print("\n🎉 投稿完了")
 
 if __name__ == "__main__":
     main()

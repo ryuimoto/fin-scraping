@@ -3,13 +3,16 @@ from bs4 import BeautifulSoup
 from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods.posts import NewPost
 import google.generativeai as genai
+import os
+from dotenv import load_dotenv
 
-# ====== 設定 ======
-wp_url          = "http://bottest.local/xmlrpc.php"
-wp_username     = "root"
-wp_password     = "root"
-gemini_api_key  = "AIzaSyDPPt9BASSongNilmj_kMJ6lSBjckvHCVQ"
-# ==================
+# ====== .envから設定を読み込み ======
+load_dotenv()
+wp_url         = os.getenv("WP_URL")
+wp_username    = os.getenv("WP_USERNAME")
+wp_password    = os.getenv("WP_PASSWORD")
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+# ====================================
 
 # 1) トップページから最新記事リンクを取得
 HOME_URL = "https://coinpost.jp/"
